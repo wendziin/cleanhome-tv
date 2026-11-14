@@ -1,3 +1,6 @@
+# Configuração pessoal do app (IP do painel, wallpapers extras). Modelo: config.example.js
+config.js
+
 # Estado local do painel: config.json e wallpapers enviados pelo celular
 panel/data/
 

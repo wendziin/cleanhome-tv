@@ -189,8 +189,9 @@
     muBtns: document.querySelectorAll(".mu-btn")
   };
 
-  var SPOTIFY_URL = (window.TV_CONFIG && window.TV_CONFIG.spotifyUrl) ||
-    "http://192.0.2.10:8795";
+  var SPOTIFY_URL = ((window.TV_CONFIG && window.TV_CONFIG.spotifyUrl) || "").replace(/\/+$/, "");
+  // Endereço opcional de um coletor de diagnóstico (perf/caps/dump). Vazio desativa.
+  var DEBUG_URL = ((window.TV_CONFIG && window.TV_CONFIG.debugUrl) || "").replace(/\/+$/, "");
   var SPOTIFY_CLIENT_ID = (window.TV_CONFIG && window.TV_CONFIG.spotifyClientId) || "";
   var SPOTIFY_REFRESH = (window.TV_CONFIG && window.TV_CONFIG.spotifyRefreshToken) || "";
   // Painel web de wallpapers (pasta CleanHome-panel). Vazio desativa.
@@ -2303,8 +2304,8 @@
       }
     } catch (e) { /* odd shape */ }
     try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("http://192.0.2.10:8792/perf", JSON.stringify(payload));
+      if (DEBUG_URL && navigator.sendBeacon) {
+        navigator.sendBeacon(DEBUG_URL + "/perf", JSON.stringify(payload));
         perfSent = true;
       }
     } catch (e) { /* diagnostics only */ }
@@ -2423,8 +2424,8 @@
     caps.media = { api: (window.tizen && typeof window.tizen.mediacontroller) || "none" };
     function send() {
       try {
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon("http://192.0.2.10:8792/caps", JSON.stringify(caps));
+        if (DEBUG_URL && navigator.sendBeacon) {
+          navigator.sendBeacon(DEBUG_URL + "/caps", JSON.stringify(caps));
         }
       } catch (e) { /* diagnostics only */ }
     }
@@ -2477,9 +2478,10 @@
         count: raw.length,
         apps: raw
       });
-      if (navigator.sendBeacon) navigator.sendBeacon("http://192.0.2.10:8792/dump", payload);
+      if (!DEBUG_URL) return;
+      if (navigator.sendBeacon) navigator.sendBeacon(DEBUG_URL + "/dump", payload);
       var beacon = new Image();
-      beacon.src = "http://192.0.2.10:8792/ping?n=" + raw.length + "&t=" + Date.now();
+      beacon.src = DEBUG_URL + "/ping?n=" + raw.length + "&t=" + Date.now();
     } catch (e) { /* diagnostics only */ }
   }
 

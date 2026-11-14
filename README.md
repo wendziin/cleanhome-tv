@@ -33,8 +33,7 @@ desligado, fora da rede ou depois de reiniciar a TV, e as miniaturas continuam f
 ```
 CleanHome/
 ├── config.xml          # manifesto Tizen (pacote tvunlock02, perfil tv)
-├── config.js           # configurações do app (URL do painel, wallpapers extras)
-├── config.example.js   # modelo de config.js, sem dados pessoais
+├── config.example.js   # modelo de config.js (o config.js real é pessoal e não versionado)
 ├── index.html          # marcação da tela inicial
 ├── main.js             # lógica do launcher (apps, foco, relógio, wallpapers, painel)
 ├── style.css           # visual
@@ -115,12 +114,18 @@ enviados. Backup = copiar essa pasta.
 
 ## Configuração do app
 
-`config.js` (copie de `config.example.js` se não existir):
+`config.js` é pessoal e **não é versionado** (está no `.gitignore`) — copie o modelo na
+primeira vez:
+
+```bash
+cp config.example.js config.js
+```
 
 ```js
 window.TV_CONFIG = {
+  panelUrl: "http://IP_DO_CELULAR:8099",  // "" desativa a sincronização
+  debugUrl: "",                           // coletor de diagnóstico da TV (opcional)
   weather: null,                          // "Cidade,UF" para mostrar clima
-  panelUrl: "http://192.0.2.10:8099",    // "" desativa a sincronização
   customWallpapers: []                    // wallpapers extras por URL
 };
 ```
@@ -154,53 +159,45 @@ ajustar o brilho não recarrega o wallpaper nem causa piscada na tela.
   as miniaturas; só enviar um wallpaper novo exige o painel de volta.
 - O painel não tem autenticação; use em rede local confiável.
 
-## Publicar no GitHub
+## Publicar no GitHub (espelho)
 
-O repositório é local; nada é enviado até você rodar o `push`. Para publicar como fork do
-projeto original:
+Este repositório é um espelho independente — não é um fork. O histórico local é próprio e
+começa do zero, sem vínculo com o repositório de origem.
+
+1. Crie um repositório **vazio** no GitHub (sem README, sem `.gitignore`, sem licença).
+2. Aponte o remoto e envie:
 
 ```bash
-# 1) Faça o fork no GitHub (botão "Fork") e copie a URL do SEU fork.
-# 2) Aponte o remoto e envie:
 cd ~/CleanHome
-git remote add origin https://github.com/SEU_USUARIO/SEU_FORK.git
+git remote add origin https://github.com/SEU_USUARIO/cleanhome.git
 git push -u origin main
 ```
 
-O primeiro `push` pode ser recusado porque o histórico local é independente do fork. Como
-o conteúdo local já é a versão que você quer publicar, use:
+Como o repositório remoto já nasce vazio, o `push` é aceito direto — sem `--force`.
+
+### O que não vai para o GitHub
+
+| Fica de fora | Por quê |
+| :--- | :--- |
+| `config.js` | IP do painel, tokens do Spotify e wallpapers pessoais (modelo: `config.example.js`) |
+| `panel/data/` | wallpapers enviados e o estado do painel |
+| `*.wgt`, `*.tpk` | builds gerados a partir do código |
+| `panel/__pycache__/` | cache do Python |
+
+Confira antes de enviar:
 
 ```bash
-git push -f -u origin main
+git ls-files | grep -E "config\.js$|panel/data|wgt" || echo "nada pessoal versionado"
+git log -p | grep -nE "([0-9]{1,3}\.){3}[0-9]{1,3}" | head
 ```
-
-Isso substitui o conteúdo do fork pelo seu. O vínculo "forked from" continua aparecendo no
-GitHub. Se preferir manter o histórico do original:
-
-```bash
-git remote add upstream https://github.com/PROJETO_ORIGINAL/CleanHome.git
-git fetch upstream
-git rebase --onto upstream/main --root main   # resolve os conflitos e segue
-git push -u origin main
-```
-
-Antes de publicar, confira o que vai junto:
-
-```bash
-git status
-git ls-files
-```
-
-`panel/data/` (seus wallpapers e o estado do painel) e os arquivos `.wgt` ficam fora do
-versionamento pelo `.gitignore`. Se você colocou IPs ou links pessoais em `config.js`,
-considere voltar para os valores de `config.example.js` no commit.
 
 ## Créditos
 
 Baseado no launcher Clean Home para TVs Tizen. A interface foi traduzida para PT-BR e
-recebeu o painel de wallpapers deste repositório.
+recebeu o painel de wallpapers deste repositório. Este é um espelho independente, mantido
+sem vínculo com o projeto de origem.
 
 ## Licença
 
-Ainda não definida neste repositório. O projeto de origem pode ter a sua própria licença —
-verifique antes de redistribuir.
+MIT — veja `LICENSE`. O projeto de origem pode ter a sua própria licença; verifique antes
+de redistribuir partes dele.
