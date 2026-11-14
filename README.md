@@ -16,6 +16,9 @@ para trocar os wallpapers direto do celular — sem editar arquivo, sem recompil
 - **Wallpaper remoto**: escolher no painel do celular aplica na TV em até 20 segundos.
 - **Descoberta automática do painel**: o app varre a rede local e acha o painel sozinho —
   não precisa mexer no código quando o IP do celular muda.
+- **Escurecimento ajustável**: um controle no painel escurece o papel de parede para os
+  ícones e o relógio aparecerem melhor. É uma camada de tinta por cima da imagem — nenhum
+  pixel a mais na memória e nenhum reprocessamento, então continua leve.
 - **Restauração no boot**: o wallpaper escolhido volta depois de desligar e ligar a TV.
 - **Limite de armazenamento**: a TV guarda só os 3 wallpapers mais recentes enviados;
   ao enviar o quarto, o mais antigo sai da TV. Os 8 wallpapers padrão são fixos.
@@ -83,6 +86,7 @@ cd CleanHome/panel
 
 No navegador do celular abra `http://IP_DA_MAQUINA:8099` e:
 
+- **Escurecimento** — arraste o controle para deixar o fundo mais escuro (0 a 60%).
 - **Enviar imagem** (ou arrastar) — a imagem vai para a lista e a TV baixa dela.
 - **Tocar numa imagem** — aplica como wallpaper na TV.
 - **Remover** — apaga do celular; se estiver ativa na TV, a TV cai para o wallpaper padrão.
@@ -102,6 +106,7 @@ enviados. Backup = copiar essa pasta.
 | GET | `/builtin/<id>.jpg` | Miniatura de um wallpaper padrão |
 | POST | `/api/upload?filename=...` | Corpo = bytes da imagem; responde `id`, `evicted`, `keep` |
 | POST | `/api/select` | `{"id": "..."}` — torna o wallpaper ativo |
+| POST | `/api/dim` | `{"value": 0..60}` — escurecimento do wallpaper em % |
 | POST | `/api/delete` | `{"id": "..."}` — remove o wallpaper |
 
 ## Configuração do app
@@ -127,6 +132,10 @@ O painel mantém um `revision` que aumenta a cada mudança. O app busca `/config
 boot, ao voltar ao primeiro plano e a cada 20 segundos — mas só aplica o `active` quando a
 revisão é maior que a última vista. Assim, uma troca feita pelo controle remoto na TV não
 é desfeita pela sincronização.
+
+O **escurecimento** é o único ajuste que não passa pela revisão: ele vale a cada busca e
+só muda o fundo da camada `#wallpaper-dim` quando o valor é diferente do atual. Por isso
+ajustar o brilho não recarrega o wallpaper nem causa piscada na tela.
 
 ## Limitações conhecidas
 

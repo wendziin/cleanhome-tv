@@ -32,6 +32,8 @@ MAX_UPLOAD = 30 * 1024 * 1024
 # quando entra um novo, para a galeria não crescer sem fim.
 KEEP_MAX = 3
 KEEP_MIN = 3
+# Escurecimento extra do wallpaper, em porcentagem (0 = visual original).
+DIM_MAX = 60
 
 # Precisa bater com a lista embutida no launcher (main.js).
 BUILTINS = [
@@ -52,7 +54,15 @@ SAFE_HOST = re.compile(r"^[A-Za-z0-9.:\[\]-]{1,120}$")
 
 def default_state():
     # active vazio = a TV mantém o wallpaper que já está usando.
-    return {"revision": 0, "active": "", "wallpapers": []}
+    return {"revision": 0, "active": "", "wallpapers": [], "dim": 0}
+
+
+def clamp_dim(value):
+    try:
+        number = int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(DIM_MAX, number))
 
 
 def load_state():
@@ -66,6 +76,9 @@ def load_state():
         state["revision"] = int(saved["revision"])
     if isinstance(saved.get("active"), str):
         state["active"] = saved["active"]
+    dim = clamp_dim(saved.get("dim"))
+    if dim is not None:
+        state["dim"] = dim
     if isinstance(saved.get("wallpapers"), list):
         for entry in saved["wallpapers"]:
             if not isinstance(entry, dict):
@@ -226,6 +239,7 @@ class PanelHandler(BaseHTTPRequestHandler):
                 "version": 1,
                 "revision": state["revision"],
                 "active": state["active"],
+                "dim": state["dim"],
                 "wallpapers": [
                     {
                         "id": entry["id"],
@@ -249,6 +263,8 @@ class PanelHandler(BaseHTTPRequestHandler):
                 "active": state["active"],
                 "base": base,
                 "keep": KEEP_MAX,
+                "dim": state["dim"],
+                "dimMax": DIM_MAX,
                 "builtins": [
                     {"id": entry["id"], "name": entry["name"],
                      "thumb": "/builtin/" + entry["id"] + ".jpg"}
@@ -314,6 +330,23 @@ class PanelHandler(BaseHTTPRequestHandler):
                 save_state(state)
             self.send_json({"ok": True, "active": target,
                             "revision": state["revision"]})
+            return
+
+        if path == "/api/dim":
+            payload = self.read_json()
+            if payload is None:
+                return
+            value = clamp_dim(payload.get("value"))
+            if value is None:
+                self.fail(400, "valor inválido")
+                return
+            with LOCK:
+                state = load_state()
+                # Escurecimento é ajuste de tela, não escolha de wallpaper:
+                # não mexe na revisão, então a TV aplica sem recarregar a imagem.
+                state["dim"] = value
+                save_state(state)
+            self.send_json({"ok": True, "dim": value})
             return
 
         if path == "/api/upload":

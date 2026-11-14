@@ -437,6 +437,30 @@
     }
     return false;
   }
+  // ---- escurecimento extra do wallpaper (ajustado no painel) ----
+  // A camada #wallpaper-dim já cobre a tela; escurecer mais é só pintar o
+  // fundo dela, o que custa uma propriedade CSS e nenhum pixel de memória.
+  var DIM_MAX = 60;
+  var dimLevel = 0;
+  function applyDim(value, remember) {
+    var level = Number(value);
+    if (!isFinite(level)) return;
+    level = Math.max(0, Math.min(DIM_MAX, Math.round(level)));
+    if (level === dimLevel) return;
+    dimLevel = level;
+    if (el.wallpaperDim) {
+      el.wallpaperDim.style.backgroundColor =
+        level ? "rgba(0,0,0," + (level / 100).toFixed(2) + ")" : "";
+    }
+    if (remember) {
+      try { localStorage.setItem("tv-panel-dim", String(level)); } catch (e) {}
+    }
+  }
+  function applySavedDim() {
+    var saved = 0;
+    try { saved = Number(localStorage.getItem("tv-panel-dim")) || 0; } catch (e) {}
+    applyDim(saved, false);
+  }
   // ---- wallpapers vindos do painel web (CleanHome-panel) ----
   function findWallpaperIndex(id) {
     for (var i = 0; i < WALLPAPERS.length; i++) {
@@ -477,6 +501,8 @@
     // No primeiro contato, o wallpaper salvo na TV volta a valer (pode ser
     // remoto e só existir depois da mesclagem acima).
     if (initial) applySavedWallpaper(true);
+    // Escurecimento é ajuste de tela: vale sempre, sem depender da revisão.
+    if (cfg.dim !== undefined && cfg.dim !== null) applyDim(cfg.dim, true);
     // A escolha do painel só é aplicada quando muda, para não desfazer uma
     // troca feita pelo controle remoto.
     var revision = Number(cfg.revision) || 0;
@@ -604,6 +630,7 @@
     function settle() {
       if (settled) return;
       settled = true;
+      applySavedDim();
       if (applySavedWallpaper()) {
         restoreFamilyCarousel();
         fetchPanelConfig(true);

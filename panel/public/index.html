@@ -47,6 +47,10 @@
   .value { font-size: 20px; font-weight: 600; margin-top: 4px; }
   .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .dim { margin-top: 14px; }
+  .dim label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dim label span { color: var(--text); font-variant-numeric: tabular-nums; }
+  .dim input[type=range] { width: 100%; margin: 10px 0 0; accent-color: #6f9cff; }
   button {
     font: inherit; color: var(--text); background: var(--card-hi);
     border: 1px solid var(--line); border-radius: 10px;
@@ -124,6 +128,12 @@
       <div class="label">Na TV agora</div>
       <div id="current-name" class="value">Carregando…</div>
       <p class="hint">Depois de aplicar, a TV troca o wallpaper em até 20 segundos.</p>
+      <div class="dim">
+        <label for="dim">Escurecimento <span id="dim-val">0%</span></label>
+        <input id="dim" type="range" min="0" max="60" step="5" value="0" disabled>
+        <p class="hint">Escurece o papel de parede para os ícones e o relógio aparecerem melhor.
+          Nada é reprocessado: a TV só ajusta uma camada de tinta em cima da imagem.</p>
+      </div>
     </div>
   </section>
 
@@ -160,6 +170,8 @@
     file: document.getElementById("file"),
     uploadBtn: document.getElementById("upload-btn"),
     keep: document.querySelector(".keep"),
+    dim: document.getElementById("dim"),
+    dimVal: document.getElementById("dim-val"),
     toast: document.getElementById("toast")
   };
 
@@ -262,10 +274,38 @@
     });
   }
 
+  function renderDim() {
+    var value = state && typeof state.dim === "number" ? state.dim : 0;
+    var max = state && state.dimMax ? state.dimMax : 60;
+    el.dim.max = String(max);
+    el.dim.value = String(value);
+    el.dimVal.textContent = value + "%";
+    el.dim.disabled = false;
+  }
+
+  function setDim(value) {
+    el.dimVal.textContent = value + "%";
+    request("/api/dim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: value })
+    }).then(function (body) {
+      var current = body.dim;
+      el.dimVal.textContent = current + "%";
+      if (state) state.dim = current;
+      toast(current ? ("Escurecimento em " + current + "%. A TV ajusta em até 20 segundos.")
+        : "Escurecimento desligado. A TV ajusta em até 20 segundos.");
+    }).catch(function (error) {
+      toast("Falha ao ajustar: " + error.message, true);
+      renderDim();
+    });
+  }
+
   function refresh() {
     return request("/api/state").then(function (data) {
       state = data;
       render();
+      renderDim();
     }).catch(function (error) {
       toast("Não foi possível ler o painel: " + error.message, true);
     });
@@ -353,6 +393,9 @@
     }
     next();
   }
+
+  el.dim.addEventListener("input", function () { el.dimVal.textContent = el.dim.value + "%"; });
+  el.dim.addEventListener("change", function () { setDim(Number(el.dim.value)); });
 
   el.uploadBtn.addEventListener("click", function () { el.file.click(); });
   el.file.addEventListener("change", function () { upload(el.file.files); });
