@@ -19,9 +19,13 @@ para trocar os wallpapers direto do celular — sem editar arquivo, sem recompil
 - **Escurecimento ajustável**: um controle no painel escurece o papel de parede para os
   ícones e o relógio aparecerem melhor. É uma camada de tinta por cima da imagem — nenhum
   pixel a mais na memória e nenhum reprocessamento, então continua leve.
+- **Cópia local dos wallpapers**: cada imagem enviada pelo painel é baixada uma vez e
+guardada no próprio app (IndexedDB). O wallpaper escolhido continua na tela com o celular
+desligado, fora da rede ou depois de reiniciar a TV, e as miniaturas continuam funcionando.
 - **Restauração no boot**: o wallpaper escolhido volta depois de desligar e ligar a TV.
-- **Limite de armazenamento**: a TV guarda só os 3 wallpapers mais recentes enviados;
-  ao enviar o quarto, o mais antigo sai da TV. Os 8 wallpapers padrão são fixos.
+- **Limite de armazenamento**: a TV guarda só os 3 wallpapers mais recentes enviados —
+  online no painel e offline na cópia local; ao enviar o quarto, o mais antigo sai da TV.
+  Os 8 wallpapers padrão são fixos.
 - Upload de JPG, PNG e WebP até 30 MB, validado pelos primeiros bytes do arquivo.
 
 ## Estrutura do repositório
@@ -145,8 +149,9 @@ ajustar o brilho não recarrega o wallpaper nem causa piscada na tela.
   re-sincronizado ao retornar ao primeiro plano.
 - O botão **Home** continua abrindo o Smart Hub da Samsung — assumir o botão Home exige
   mexer em configurações internas da TV, o que este projeto não faz.
-- A TV baixa os wallpapers do painel: se o celular estiver desligado, a imagem atual
-  continua aparecendo, mas trocar de wallpaper e as miniaturas ficam indisponíveis.
+- A primeira sincronização ainda precisa do painel ligado: é quando a TV baixa a cópia
+  local de cada imagem. Depois disso, desligar o celular não afeta o wallpaper ativo nem
+  as miniaturas; só enviar um wallpaper novo exige o painel de volta.
 - O painel não tem autenticação; use em rede local confiável.
 
 ## Publicar no GitHub

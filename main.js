@@ -327,7 +327,11 @@
       // video.load() here stalls the TV's main thread during OK/selection.
       if (!still) setTimeout(function () { try { el.wallpaper.load(); } catch (e) {} }, 0);
     }
-    try { localStorage.setItem("tv-wallpaper", wp.id); } catch (e) {}
+    // Só grava quando é escolha de verdade: o fallback do boot não pode
+    // apagar o wallpaper que o usuário tinha escolhido.
+    if (options.remember !== false) {
+      try { localStorage.setItem("tv-wallpaper", wp.id); } catch (e) {}
+    }
     if (isFamilyWallpaper(wp) && state.familyCarousel && !options.fromCarousel) scheduleFamilyCarousel();
     renderControls();
     if (!options.quiet) toast("Plano de Fundo: " + wp.name);
@@ -471,14 +475,21 @@
   function mergeRemoteWallpapers(list) {
     var kept = [];
     for (var i = 0; i < WALLPAPERS.length; i++) {
-      if (!WALLPAPERS[i].remote) kept.push(WALLPAPERS[i]);
+      // A cópia local sobrevive à mesclagem: é ela que mantém o wallpaper na
+      // tela quando o painel está desligado ou fora da rede.
+      if (!WALLPAPERS[i].remote || WALLPAPERS[i].cached) kept.push(WALLPAPERS[i]);
     }
     WALLPAPERS = kept;
     var known = {};
     for (i = 0; i < WALLPAPERS.length; i++) known[WALLPAPERS[i].id] = true;
     for (i = 0; i < list.length; i++) {
       var wp = list[i];
-      if (!wp || !wp.id || !wp.file || known[wp.id]) continue;
+      if (!wp || !wp.id || !wp.file) continue;
+      if (known[wp.id]) {
+        var at = findWallpaperIndex(wp.id);
+        if (at >= 0 && WALLPAPERS[at].remote && wp.name) WALLPAPERS[at].name = wp.name;
+        continue;
+      }
       known[wp.id] = true;
       WALLPAPERS.push({
         id: wp.id,
@@ -491,10 +502,159 @@
       });
     }
   }
+  // ---- cópia local dos wallpapers do painel ----
+  // O painel publica URLs, então a imagem mora no celular. Sem uma cópia no
+  // próprio app, desligar o painel (ou reiniciar a TV) apagava o wallpaper
+  // escolhido. Aqui cada arquivo é baixado uma vez e guardado no IndexedDB do
+  // app — que é disco do próprio app, sem privilégio novo e sem estourar o
+  // localStorage (que é pequeno e já guarda a interface).
+  var CACHE_DB = "cleanhome-wallpapers";
+  var CACHE_STORE = "files";
+  var cacheDbPromise = null;
+  var cacheUrls = {};
+  // URLs apostas para liberar: se o wallpaper ainda está na tela, a URL só
+  // pode ser revogada depois de ele sair (o <img> pode ser reatribuído).
+  var cachePending = {};
+  function cacheDb() {
+    if (!window.indexedDB) return Promise.resolve(null);
+    if (cacheDbPromise) return cacheDbPromise;
+    cacheDbPromise = new Promise(function (resolve) {
+      var req;
+      try { req = window.indexedDB.open(CACHE_DB, 1); } catch (e) { resolve(null); return; }
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(CACHE_STORE)) {
+          db.createObjectStore(CACHE_STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { resolve(null); };
+      req.onblocked = function () { resolve(null); };
+    });
+    return cacheDbPromise;
+  }
+  function cacheTx(mode, work) {
+    return cacheDb().then(function (db) {
+      if (!db) return null;
+      return new Promise(function (resolve) {
+        var tx, store, req, result = null;
+        try {
+          tx = db.transaction(CACHE_STORE, mode);
+          store = tx.objectStore(CACHE_STORE);
+          req = work(store);
+        } catch (e) { resolve(null); return; }
+        if (req) req.onsuccess = function () { result = req.result; };
+        tx.oncomplete = function () { resolve(result); };
+        tx.onerror = function () { resolve(null); };
+        tx.onabort = function () { resolve(null); };
+      });
+    });
+  }
+  function cacheUrl(row) {
+    if (!row || !row.id || !row.blob) return "";
+    if (!cacheUrls[row.id]) {
+      try { cacheUrls[row.id] = URL.createObjectURL(row.blob); } catch (e) { return ""; }
+    }
+    return cacheUrls[row.id];
+  }
+  function cacheLoad() {
+    return cacheTx("readonly", function (store) { return store.getAll(); }).then(function (rows) {
+      var out = [];
+      if (!Array.isArray(rows)) return out;
+      for (var i = 0; i < rows.length; i++) {
+        var url = cacheUrl(rows[i]);
+        if (url) out.push({ id: rows[i].id, name: rows[i].name || "", url: url });
+      }
+      return out;
+    });
+  }
+  function cacheOne(wp) {
+    return cacheTx("readonly", function (store) { return store.get(wp.id); }).then(function (row) {
+      if (row && row.blob) { cacheUrl(row); return; }
+      return fetch(wp.file, { cache: "no-store" }).then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.blob();
+      }).then(function (blob) {
+        if (!blob || !blob.size) return;
+        return cacheTx("readwrite", function (store) {
+          return store.put({ id: wp.id, name: wp.name || "", blob: blob, savedAt: Date.now() });
+        });
+      }).catch(function () { /* tenta de novo na próxima busca do painel */ });
+    });
+  }
+  function cacheStore(list) {
+    // Lista vazia é válida (painel sem wallpapers): aí as cópias antigas saem.
+    if (!Array.isArray(list)) return;
+    var nowActive = WALLPAPERS[wallpaperIndex] ? WALLPAPERS[wallpaperIndex].id : "";
+    for (var pending in cachePending) {
+      if (pending === nowActive) continue;
+      try { URL.revokeObjectURL(cachePending[pending]); } catch (e) {}
+      if (cacheUrls[pending] === cachePending[pending]) delete cacheUrls[pending];
+      delete cachePending[pending];
+    }
+    cacheTx("readonly", function (store) { return store.getAllKeys(); }).then(function (keys) {
+      keys = Array.isArray(keys) ? keys : [];
+      var keep = {};
+      var missing = [];
+      for (var i = 0; i < list.length; i++) {
+        var wp = list[i];
+        if (!wp || !wp.id || !wp.file) continue;
+        keep[wp.id] = true;
+        if (keys.indexOf(wp.id) < 0) missing.push(wp);
+      }
+      // Só apaga a cópia quando o painel respondeu e a lista mudou: offline,
+      // tudo o que está na TV continua lá.
+      var stale = [];
+      for (i = 0; i < keys.length; i++) {
+        if (!keep[keys[i]]) stale.push(keys[i]);
+      }
+      if (stale.length) {
+        // Libera a URL e o blob; a não ser que seja o wallpaper na tela, que
+        // pode ser reatribuído (ex.: quando o áudio pausa e o vídeo volta).
+        var activeId = WALLPAPERS[wallpaperIndex] ? WALLPAPERS[wallpaperIndex].id : "";
+        for (i = 0; i < stale.length; i++) {
+          if (!cacheUrls[stale[i]]) continue;
+          if (stale[i] === activeId) { cachePending[stale[i]] = cacheUrls[stale[i]]; continue; }
+          try { URL.revokeObjectURL(cacheUrls[stale[i]]); } catch (e) {}
+          delete cacheUrls[stale[i]];
+        }
+        cacheTx("readwrite", function (store) {
+          for (var j = 0; j < stale.length; j++) store.delete(stale[j]);
+          return null;
+        });
+      }
+      missing.reduce(function (p, wp) {
+        return p.then(function () { return cacheOne(wp); });
+      }, Promise.resolve());
+    });
+  }
+  // No boot, as cópias entram na lista antes de o wallpaper salvo ser aplicado.
+  function mergeCachedWallpapers() {
+    return cacheLoad().then(function (entries) {
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        if (findWallpaperIndex(entry.id) >= 0) continue;
+        WALLPAPERS.push({
+          id: entry.id,
+          name: entry.name || "Personalizado",
+          file: entry.url,
+          thumb: entry.url,
+          category: "custom",
+          still: true,
+          remote: true,
+          cached: true
+        });
+      }
+      if (state.wallOpen) renderWallPicker();
+    });
+  }
   function applyPanelConfig(cfg, initial) {
     if (!cfg || !Array.isArray(cfg.wallpapers)) return;
     var currentId = WALLPAPERS[wallpaperIndex] ? WALLPAPERS[wallpaperIndex].id : "";
     mergeRemoteWallpapers(cfg.wallpapers);
+    // Baixa (em segundo plano) o que ainda não está na TV para o wallpaper
+    // continuar valendo com o painel desligado.
+    cacheStore(cfg.wallpapers);
     var current = findWallpaperIndex(currentId);
     wallpaperIndex = current < 0 ? 0 : current;
     if (state.wallOpen) renderWallPicker();
@@ -636,8 +796,18 @@
         fetchPanelConfig(true);
         return;
       }
-      setWallpaper(1);
+      // Nada salvo (ou o wallpaper escolhido ainda não existe nesta TV): mostra
+      // o padrão sem gravar a escolha, para ela voltar quando estiver acessível.
+      setWallpaper(1, { quiet: true, remember: false });
       fetchPanelConfig(true);
+    }
+    function finish() {
+      // As cópias locais precisam entrar na lista antes de aplicar o wallpaper
+      // salvo, senão um wallpaper do painel não é reconhecido no boot.
+      mergeCachedWallpapers().then(function () {
+        restoreFamilyCarousel();
+        settle();
+      }, settle);
     }
     // Suporte a wallpapers personalizados configurados no config.js
     if (window.TV_CONFIG && Array.isArray(window.TV_CONFIG.customWallpapers)) {
@@ -656,16 +826,15 @@
       });
     }
     fetch("wallpapers.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (list) {
-      if (!Array.isArray(list) || !list.length) { settle(); return; }
+      if (!Array.isArray(list) || !list.length) { finish(); return; }
       var off = WALLPAPERS.filter(function (w) { return !w.file; });
       var known = {}; WALLPAPERS.forEach(function (w) { known[w.id] = true; });
       var extra = list.filter(function (w) { return w && w.file && !known[w.id]; })
         .map(function (w) { return { id: w.id, name: w.name || w.id, file: w.file, thumb: w.thumb || w.file, category: w.category, still: true }; });
       if (extra.length) WALLPAPERS = off.concat(WALLPAPERS.filter(function (w) { return w.file; }), extra);
       if (state.wallOpen) renderWallPicker();
-      restoreFamilyCarousel();
-      settle();
-    }).catch(settle);
+      finish();
+    }).catch(finish);
   }
   function wallpaperFocus() {
     var nodes = el.wallgrid.querySelectorAll(".wp-tile");

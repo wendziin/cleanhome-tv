@@ -169,11 +169,15 @@ html, body {
   width: 190px; height: 140px;
   border-radius: 18px;
   margin-right: 16px;
+  /* Borda sempre presente e transparente: no foco ela só ganha cor, então o
+     tile não muda de tamanho nem empurra os vizinhos (box-sizing: border-box). */
+  border: 2px solid transparent;
   transform: translateZ(0);
   will-change: transform;
   backface-visibility: hidden;
   display: flex; align-items: center; justify-content: center;
-  transition: transform 180ms cubic-bezier(.2,.7,.2,1);
+  transition: transform 180ms cubic-bezier(.2,.7,.2,1), box-shadow 160ms linear,
+    background-color 160ms linear, border-color 160ms linear;
 }
 .tile:last-child { margin-right: 0; }
 .tile .mark {
@@ -208,11 +212,20 @@ html, body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   opacity: 0;
   will-change: opacity;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
   transition: opacity 140ms linear;
 }
+/* Foco de alto contraste: funciona sobre qualquer wallpaper, claro ou escuro.
+   Só um tile fica em foco por vez, então a sombra dupla e o blur custam um
+   elemento só — o resto da tela não é repintado. */
 .tile.focus {
-  transform: translateZ(0) translateY(-8px) scale(1.04);
+  transform: translateZ(0) translateY(-8px) scale(1.06);
   z-index: 2;
+  border-color: rgba(255, 255, 255, 0.95);
+  background-color: rgba(255, 255, 255, 0.22);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.8), inset 0 0 10px rgba(255, 255, 255, 0.4);
 }
 .tile.focus .name { opacity: 1; }
 .tile.focus .name { opacity: 1; transform: translateY(0); }
@@ -504,11 +517,15 @@ html, body {
 .wp-title { font-size: 34px; font-weight: 500; letter-spacing: 0.02em; }
 .wp-hint { font-size: 20px; color: rgba(243,245,248,0.6); }
 .wp-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 22px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
-.wp-tile { position: relative; border-radius: 18px; overflow: hidden; height: 156px; background: rgba(255,255,255,0.06); border: 2px solid transparent; transition: transform 160ms; }
+.wp-tile { position: relative; border-radius: 18px; overflow: hidden; height: 156px; background: rgba(255,255,255,0.06); border: 2px solid transparent; transition: transform 160ms, box-shadow 160ms linear, border-color 160ms linear; }
 .wp-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.wp-tile .wp-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 14px; font-size: 18px; background: linear-gradient(to top, rgba(0,0,0,0.82), transparent); }
-.wp-tile.focus { border-color: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,0.7); transform: scale(1.03); }
-.wp-tile.sel::after { content: "✓"; position: absolute; top: 8px; right: 12px; font-size: 22px; }
+.wp-tile .wp-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 14px; font-size: 18px; background: linear-gradient(to top, rgba(0,0,0,0.82), transparent); text-shadow: 0 2px 8px rgba(0,0,0,0.85); }
+/* A imagem cobre o tile, então o brilho interno vai numa camada por cima. */
+.wp-tile.focus::before { content: ""; position: absolute; left: 0; top: 0; right: 0; bottom: 0; box-shadow: inset 0 0 10px rgba(255,255,255,0.4); pointer-events: none; z-index: 1; }
+.wp-tile.focus { border-color: rgba(255, 255, 255, 0.95); box-shadow: 0 0 18px rgba(255, 255, 255, 0.8); transform: scale(1.06); z-index: 2; }
+/* Wallpaper ativo (o que está na TV), mesmo sem foco. */
+.wp-tile.sel { border-color: rgba(255, 255, 255, 0.95); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.55); }
+.wp-tile.sel::after { content: "✓"; position: absolute; top: 8px; right: 12px; font-size: 22px; z-index: 2; }
 .wp-tile.off { display: flex; align-items: center; justify-content: center; font-size: 20px; color: rgba(243,245,248,0.7); background: rgba(255,255,255,0.04); }
 #stage > .wallpicker { z-index: 4; }
 
@@ -518,7 +535,12 @@ html, body {
 
 /* Prime Video reads as a white plate with the blue wordmark. */
 .tile.prime { background: #ffffff; }
-.tile.prime.focus { background: #ffffff; }
+/* Sobre o tile branco, a borda branca sumiria: o anel de contraste é escuro. */
+.tile.prime.focus {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.8), inset 0 0 10px rgba(0, 0, 0, 0.12);
+}
 
 /* ---- app-store style icons + weather ---- */
 .tile img.appicon { width: 100%; height: 100%; object-fit: contain; border-radius: 16px; }
@@ -547,11 +569,18 @@ html, body {
 }
 .controls[hidden] { display: none; }
 .controls-head { font-size: 15px; letter-spacing: 0.22em; color: rgba(243,245,248,0.42); margin: 6px 12px 12px; }
-.ctrl-item { display: flex; align-items: center; padding: 12px 14px; border-radius: 14px; font-size: 24px; color: rgba(243,245,248,0.82); }
+.ctrl-item { display: flex; align-items: center; padding: 12px 14px; border-radius: 14px; font-size: 24px; color: rgba(243,245,248,0.82); border: 2px solid transparent; transition: background 140ms linear, color 140ms linear, transform 140ms ease-out, box-shadow 140ms linear; }
 .ctrl-item .sub { margin-left: auto; font-size: 18px; color: rgba(243,245,248,0.5); }
 .ctrl-item.connected { color: #73e6a0; }
 .ctrl-item.connected .sub { color: #55d982; }
-.ctrl-item.focus { background: #fff; color: #111; }
+.ctrl-item.focus {
+  background: #fff; color: #111;
+  /* Linha branca por dentro e halo por fora: separa o item da lista mesmo
+     quando o popover está sobre um wallpaper claro. */
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.75), inset 0 0 10px rgba(0, 0, 0, 0.12);
+  transform: scale(1.03);
+}
 .ctrl-item.focus .sub { color: rgba(0,0,0,0.5); }
 .ctrl-item.focus .ctrl-icon { filter: brightness(0) saturate(100%); }
 
