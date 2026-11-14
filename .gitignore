@@ -1,0 +1,11 @@
+# Estado local do painel: config.json e wallpapers enviados pelo celular
+panel/data/
+
+# Builds (o .wgt é gerado a partir do código, não versionado)
+*.wgt
+*.tpk
+*.o
+
+# Python
+__pycache__/
+*.pyc

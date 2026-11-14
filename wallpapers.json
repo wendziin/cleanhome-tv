@@ -1,0 +1,79 @@
+[
+  {
+    "id": "espaco-profundo",
+    "name": "Espaço Profundo",
+    "category": "abstract",
+    "file": "wallpapers/espaco-profundo.jpg",
+    "thumb": "wallpapers/thumbs/espaco-profundo.jpg"
+  },
+  {
+    "id": "montanhas-sunset",
+    "name": "Pôr do Sol nas Montanhas",
+    "category": "nature",
+    "file": "wallpapers/montanhas-sunset.jpg",
+    "thumb": "wallpapers/thumbs/montanhas-sunset.jpg"
+  },
+  {
+    "id": "cidade-cyberpunk",
+    "name": "Cidade Neon Cyberpunk",
+    "category": "urban",
+    "file": "wallpapers/cidade-cyberpunk.jpg",
+    "thumb": "wallpapers/thumbs/cidade-cyberpunk.jpg"
+  },
+  {
+    "id": "floresta-neblina",
+    "name": "Floresta e Neblina",
+    "category": "nature",
+    "file": "wallpapers/floresta-neblina.jpg",
+    "thumb": "wallpapers/thumbs/floresta-neblina.jpg"
+  },
+  {
+    "id": "ondas-neon",
+    "name": "Ondas Abstratas Azuis",
+    "category": "abstract",
+    "file": "wallpapers/ondas-neon.jpg",
+    "thumb": "wallpapers/thumbs/ondas-neon.jpg"
+  },
+  {
+    "id": "deserto-minimalista",
+    "name": "Dunas do Deserto",
+    "category": "nature",
+    "file": "wallpapers/deserto-minimalista.jpg",
+    "thumb": "wallpapers/thumbs/deserto-minimalista.jpg"
+  },
+  {
+    "id": "aurora-boreal",
+    "name": "Aurora Boreal",
+    "category": "nature",
+    "file": "wallpapers/aurora-boreal.jpg",
+    "thumb": "wallpapers/thumbs/aurora-boreal.jpg"
+  },
+  {
+    "id": "ceu-estrelado",
+    "name": "Céu Noturno Estrelado",
+    "category": "nature",
+    "file": "wallpapers/ceu-estrelado.jpg",
+    "thumb": "wallpapers/thumbs/ceu-estrelado.jpg"
+  },
+  {
+    "id": "web-praia",
+    "name": "Praia Tropical (Web)",
+    "category": "web",
+    "file": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1920&q=80",
+    "thumb": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=360&q=70"
+  },
+  {
+    "id": "web-tokyo",
+    "name": "Tóquio Neon (Web)",
+    "category": "web",
+    "file": "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1920&q=80",
+    "thumb": "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=360&q=70"
+  },
+  {
+    "id": "local-celular",
+    "name": "Meu Celular (foto1.jpg)",
+    "category": "local",
+    "file": "http://192.0.2.10:8080/foto1.jpg",
+    "thumb": "http://192.0.2.10:8080/foto1.jpg"
+  }
+]
