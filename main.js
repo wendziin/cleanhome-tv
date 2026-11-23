@@ -11,41 +11,6 @@
 (function () {
   "use strict";
 
-  // Tizen's Spotify Web Playback SDK iframe ships allow="encrypted-media" only;
-  // without "autoplay" the browser blocks its audio element (player stays
-  // paused, no sound). Force autoplay into every iframe's allow list.
-  (function forceIframeAutoplay() {
-    function fix(n) {
-      try {
-        if (!n || n.tagName !== "IFRAME") return;
-        var a = n.getAttribute("allow") || "";
-        if (a.indexOf("autoplay") < 0) n.setAttribute("allow", (a ? a + "; " : "") + "autoplay");
-      } catch (e) {}
-    }
-    var origCreate = document.createElement;
-    document.createElement = function (tag) {
-      var node = origCreate.apply(document, arguments);
-      fix(node);
-      return node;
-    };
-    try {
-      new MutationObserver(function (muts) {
-        for (var i = 0; i < muts.length; i++) {
-          var m = muts[i];
-          if (m.type === "childList") {
-            for (var j = 0; j < m.addedNodes.length; j++) fix(m.addedNodes[j]);
-          } else if (m.type === "attributes") {
-            fix(m.target);
-          }
-        }
-      }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["allow"] });
-    } catch (e) {}
-    setInterval(function () {
-      var fs = document.querySelectorAll("iframe");
-      for (var i = 0; i < fs.length; i++) fix(fs[i]);
-    }, 2500);
-  })();
-
   var DIAGNOSTICS = false; // in-app perf/dump beacons; off in normal builds
   var SELF = "tvunlock02.Launcher";
   var SETTINGS_APP = "com.samsung.tv.coba.setting";
@@ -110,8 +75,6 @@
     titleKey: "",
     titleIndex: -1,
     focusedTile: null,
-    musicOpen: false,
-    musicIndex: 1,
     wallOpen: false,
     wallIndex: 1,
     controlsOpen: false,
@@ -168,45 +131,21 @@
     toast: document.getElementById("toast"),
     wallpicker: document.getElementById("wallpicker"),
     wallgrid: document.getElementById("wallgrid"),
-    greeting: document.getElementById("greeting"),
-    npCard: document.getElementById("np-card"),
-    npArt: document.getElementById("np-art"),
-    npNote: document.getElementById("np-note"),
-    npTitle: document.getElementById("np-title"),
-    npArtist: document.getElementById("np-artist"),
-    npFill: document.getElementById("np-fill"),
-    npState: document.getElementById("np-state"),
-    music: document.getElementById("music"),
-    muArt: document.getElementById("mu-art"),
-    muNote: document.getElementById("mu-note"),
-    muTitle: document.getElementById("mu-title"),
-    muArtist: document.getElementById("mu-artist"),
-    muFill: document.getElementById("mu-fill"),
-    muPos: document.getElementById("mu-pos"),
-    muDur: document.getElementById("mu-dur"),
-    muBtns: document.querySelectorAll(".mu-btn")
+    greeting: document.getElementById("greeting")
   };
 
   // Endereço opcional de um coletor de diagnóstico (perf/caps/dump). Vazio desativa.
   var DEBUG_URL = ((window.TV_CONFIG && window.TV_CONFIG.debugUrl) || "").replace(/\/+$/, "");
-  var SPOTIFY_CLIENT_ID = (window.TV_CONFIG && window.TV_CONFIG.spotifyClientId) || "";
-  var SPOTIFY_REFRESH = (window.TV_CONFIG && window.TV_CONFIG.spotifyRefreshToken) || "";
   // Painel web de wallpapers (pasta CleanHome-panel). Vazio desativa.
   var PANEL_URL = ((window.TV_CONFIG && window.TV_CONFIG.panelUrl) || "").replace(/\/+$/, "");
   // Porta usada na varredura de descoberta (celular com IP novo).
   var PANEL_PORT = (/:(\d+)$/.exec(PANEL_URL) || [null, "8099"])[1];
-  var PANEL_POLL_MS = 20000;
-  var PANEL_SCAN_MIN_MS = 5 * 60 * 1000;
+  var PANEL_POLL_MS = 60000;
+  var PANEL_SCAN_MIN_MS = 15 * 60 * 1000;
   // Endereço do painel em uso (pode vir da descoberta, não só do config.js).
   var panelBase = "";
   var panelScanAt = 0;
   var panelScanning = null;
-  var spotifyAccess = null;
-  var PLAY_ICON = '<svg viewBox="0 0 24 24" width="30" height="30" fill="#f3f5f8"><path d="M8 5l11 7-11 7z"/></svg>';
-  var PAUSE_ICON = '<svg viewBox="0 0 24 24" width="30" height="30" fill="#f3f5f8"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
-  var np = null;
-  var npTimer = null;
-
   // ---- live wallpaper / still wallpapers ----
   var WALLPAPERS = [
     { id: "off", name: "Desativado (Tema Puro)" },
@@ -335,80 +274,6 @@
     if (!options.quiet) toast("Plano de Fundo: " + wp.name);
   }
   function cycleWallpaper(dir) { setWallpaper(wallpaperIndex + (dir || 1)); }
-  function probeToast(msg) {
-    el.toast.textContent = msg;
-    el.toast.className = "toast show";
-    if (toast.timer) clearTimeout(toast.timer);
-    toast.timer = setTimeout(function () { el.toast.className = "toast"; }, 9000);
-  }
-  function probeEme() {
-    if (!navigator.requestMediaKeySystemAccess) { probeToast("EME: not available"); return; }
-    probeToast("EME: probing...");
-    var cfgs = [{ initDataTypes: ["cenc"],
-      audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }] }];
-    navigator.requestMediaKeySystemAccess("com.widevine.alpha", cfgs)
-      .then(function () { probeToast("EME: Widevine audio SUPPORTED"); })
-      .catch(function () { probeToast("EME: no Widevine audio"); });
-  }
-  var wallpaperResumeTimer = null;
-  function wallpaperMediaHold(hold) {
-    if (!el.wallpaper) return;
-    if (hold || sdkDeviceId) {
-      if (wallpaperResumeTimer) { clearTimeout(wallpaperResumeTimer); wallpaperResumeTimer = null; }
-      try { el.wallpaper.pause(); } catch (e) {}
-      // Fully release the <video> media element; pausing alone still holds the
-      // decoder/pipeline and Tizen reclaims it from Spotify after a few seconds.
-      if (el.wallpaper.getAttribute("src")) {
-        el.wallpaper.removeAttribute("src");
-        try { el.wallpaper.load(); } catch (e) {}
-      }
-      if (el.wallpaperStill && el.wallpaperStill.getAttribute("src")) el.wallpaperStill.classList.add("on");
-      if (el.wallpaperStillNext && el.wallpaperStillNext.getAttribute("src")) el.wallpaperStillNext.classList.add("on");
-    } else {
-      if (wallpaperResumeTimer) clearTimeout(wallpaperResumeTimer);
-      wallpaperResumeTimer = setTimeout(function () {
-        wallpaperResumeTimer = null;
-        var wp = WALLPAPERS[wallpaperIndex];
-        if (wp && wp.file && !isStillWallpaper(wp)) {
-          if (el.wallpaper.getAttribute("src") !== wp.file) el.wallpaper.src = wp.file;
-          el.wallpaper.classList.add("on");
-          el.wallpaperDim.classList.add("on");
-          try { el.wallpaper.play(); } catch (e) {}
-        } else if (wp && isStillWallpaper(wp)) {
-          el.wallpaper.classList.remove("on");
-          el.wallpaperDim.classList.add("on");
-          if (el.wallpaperStill) el.wallpaperStill.classList.add("on");
-        }
-        if (el.wallpaperStill && (!wp || !isStillWallpaper(wp))) el.wallpaperStill.classList.remove("on");
-        if (el.wallpaperStillNext && (!wp || !isStillWallpaper(wp))) el.wallpaperStillNext.classList.remove("on");
-      }, 1600);
-    }
-  }
-  function sdkDiag() {
-    var out = "SDK";
-    var ifr = document.querySelectorAll("iframe");
-    var aud = document.querySelectorAll("audio");
-    out += " ifr=" + ifr.length + " aud=" + aud.length;
-    if (ifr[0]) {
-      var f = ifr[0];
-      out += " sbx=" + (f.getAttribute("sandbox") || "-");
-      var before = String(f.allow || "-").slice(0, 12);
-      try { f.setAttribute("allow", "autoplay; encrypted-media; fullscreen"); } catch (e) {}
-      out += " before=" + before + " now=" + String(f.allow || "-").slice(0, 24);
-    }
-    for (var i = 0; i < aud.length && i < 2; i++) {
-      out += " [m" + (aud[i].muted ? 1 : 0) + "p" + (aud[i].paused ? 1 : 0) + "v" + Math.round(aud[i].volume * 100) + "]";
-      try { if (aud[i].muted) aud[i].muted = false; if (aud[i].paused) aud[i].play(); } catch (e) {}
-    }
-    if (!sdkPlayer) { probeToast(out + " no-player"); return; }
-    sdkPlayer.getVolume().then(function (v) {
-      out += " vol=" + Math.round(v * 100);
-      return sdkPlayer.getCurrentState();
-    }).then(function (st) {
-      out += st ? (" paused=" + st.paused) : " state=null";
-      probeToast(out);
-    }).catch(function () { probeToast(out + " ERR"); });
-  }
   function applySavedWallpaper(quiet) {
     var id = BOOT_WALLPAPER_ID;
     if (!id) { try { id = localStorage.getItem("tv-wallpaper") || ""; } catch (e) {} }
@@ -941,7 +806,6 @@
     { key: "settings", label: "Configurações da TV", icon: "icons/gear.svg" },
     { key: "theme", label: "Tema da Interface", icon: "icons/theme.svg" },
     { key: "family-carousel", label: "Troca Automática", icon: "icons/theme.svg" },
-    { key: "diag", label: "Diagnóstico", icon: "icons/diag.svg" },
     { key: "home", label: "Smart Hub Original", icon: "icons/home.svg" }
   ];
   function hdmiConnected(port) {
@@ -1040,7 +904,6 @@
       }
       return;
     }
-    if (item.key === "diag") { sdkDiag(); return; }
     if (item.key === "home") { launch({ id: SAMSUNG_HOME, name: "Smart Hub Original" }); return; }
   }
 
@@ -1357,7 +1220,6 @@
       return "Não conectado";
     }
     return [
-      { key: "music", label: "Música", sub: "Spotify" },
       { key: "wifi", label: "Wi-Fi", sub: state.network === "WIFI" && state.wifiStatus !== "OFF" ? (state.wifiSsid || "Conectado") : (state.network === "ETHERNET" ? "Rede cabeada" : "Sem rede"), up: (state.network === "WIFI" && state.wifiStatus !== "OFF") || state.network === "ETHERNET" },
       { key: "hdmi1", label: "HDMI 1", sub: hdmiStatus(1), up: hdmiStatus(1) === "Conectado" },
       { key: "hdmi2", label: "HDMI 2", sub: hdmiStatus(2), up: hdmiStatus(2) === "Conectado" },
@@ -1525,8 +1387,6 @@
   }
 
   function paintFocus() {
-    if (el.npCard) el.npCard.classList.remove("focus");
-
     if (state.view === "grid") {
       var gridNodes = el.grid.querySelectorAll(".tile");
       setFocusedTile(gridNodes[state.gridIndex]);
@@ -1554,19 +1414,6 @@
       setStack(el.eyebrowStack, "quick");
       showTitle("rail", railItems().map(function (r) { return r.label; }), state.railIndex);
       setStack(el.subStack, "quick");
-      return;
-    }
-
-    if (state.zone === "card") {
-      setFocusedTile(null);
-      movePlate(el.dockPlate, null);
-      movePlate(el.gridPlate, null);
-      setChips(el.utils, -1);
-      setChips(el.rail, -1);
-      el.npCard.classList.add("focus");
-      setStack(el.eyebrowStack, "music");
-      showTitle("music", [np ? np.title : "Tocando agora"], 0);
-      setStack(el.subStack, "music");
       return;
     }
 
@@ -1662,267 +1509,6 @@
     paintFocus();
   }
 
-  function fmtTime(ms) {
-    var total = Math.round((ms || 0) / 1000);
-    return Math.floor(total / 60) + ":" + ("0" + (total % 60)).slice(-2);
-  }
-
-  function renderMusicPanel() {
-    if (!np) return;
-    setText(el.muTitle, np.title || "");
-    setText(el.muArtist, np.artist || "");
-    var pct = np.duration_ms ? Math.max(0, Math.min(100, np.progress_ms / np.duration_ms * 100)) : 0;
-    el.muFill.style.width = pct + "%";
-    setText(el.muPos, fmtTime(np.progress_ms));
-    setText(el.muDur, fmtTime(np.duration_ms));
-    if (np.art) {
-      if (el.muArt.getAttribute("src") !== np.art) el.muArt.src = np.art;
-      el.muArt.classList.add("on");
-      el.muNote.style.display = "none";
-    } else {
-      el.muArt.classList.remove("on");
-      el.muNote.style.display = "flex";
-    }
-    if (state.lastPlaying !== np.playing) {
-      state.lastPlaying = np.playing;
-      if (el.muBtns[1]) el.muBtns[1].innerHTML = np.playing ? PAUSE_ICON : PLAY_ICON;
-    }
-  }
-
-  function renderNowPlaying() {
-    if (!np || !np.title) {
-      el.npCard.hidden = false;
-      setText(el.npTitle, "Nada tocando");
-      setText(el.npArtist, "Pressione OK para tocar na TV");
-      el.npFill.style.width = "0%";
-      if (el.npArt.getAttribute("src") !== "icons/cd.svg") el.npArt.src = "icons/cd.svg";
-      el.npArt.classList.add("on");
-      el.npNote.style.display = "none";
-      el.npState.innerHTML = PLAY_ICON;
-      return;
-    }
-    el.npCard.hidden = false;
-    setText(el.npTitle, np.title);
-    setText(el.npArtist, np.artist || "");
-    var pct = np.duration_ms ? Math.max(0, Math.min(100, np.progress_ms / np.duration_ms * 100)) : 0;
-    el.npFill.style.width = pct + "%";
-    if (np.art) {
-      if (el.npArt.getAttribute("src") !== np.art) el.npArt.src = np.art;
-      el.npArt.classList.add("on");
-      el.npNote.style.display = "none";
-    } else {
-      el.npArt.classList.remove("on");
-      el.npNote.style.display = "flex";
-    }
-    el.npState.innerHTML = np.playing ? PAUSE_ICON : PLAY_ICON;
-    if (state.musicOpen) renderMusicPanel();
-  }
-
-  function spotifyRefreshToken() {
-    if (spotifyAccess && Date.now() < spotifyAccess.expiresAt - 30000) return Promise.resolve();
-    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REFRESH) return Promise.reject(new Error("no token"));
-    var body = new URLSearchParams();
-    body.append("grant_type", "refresh_token");
-    body.append("refresh_token", SPOTIFY_REFRESH);
-    body.append("client_id", SPOTIFY_CLIENT_ID);
-    return fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString()
-    }).then(function (r) { return r.json(); }).then(function (j) {
-      if (!j.access_token) throw new Error("refresh failed");
-      spotifyAccess = { token: j.access_token, expiresAt: Date.now() + (j.expires_in || 3600) * 1000 };
-    });
-  }
-
-  function spotifyApi(path, method, query, body) {
-    return spotifyRefreshToken().then(function () {
-      var opts = { method: method || "GET",
-        headers: { "Authorization": "Bearer " + spotifyAccess.token, "Content-Type": "application/json" },
-        cache: "no-store" };
-      if (body !== undefined) opts.body = JSON.stringify(body);
-      return fetch("https://api.spotify.com/v1" + path + (query ? "?" + query : ""), opts);
-    });
-  }
-
-  var sdkPlayer = null;
-  var sdkDeviceId = null;
-  var sdkLastTrack = null;
-  var sdkLastActivate = 0;
-  function keepSdkActive() {
-    if (!sdkPlayer || !sdkPlayer.activateElement) return;
-    if (Date.now() - sdkLastActivate < 1800) return;
-    sdkLastActivate = Date.now();
-    try { sdkPlayer.activateElement(); } catch (e) {}
-  }
-  function initSpotifySdk() {
-    if (!window.Spotify || !window.Spotify.Player || sdkPlayer) return;
-    sdkPlayer = new window.Spotify.Player({
-      name: "Clean Home TV",
-      getOAuthToken: function (cb) {
-        spotifyRefreshToken().then(function () { cb(spotifyAccess.token); })
-          .catch(function () { cb(""); });
-      }
-    });
-    sdkPlayer.addListener("ready", function (d) {
-      sdkDeviceId = d.device_id;
-      if (sdkPlayer.activateElement) { try { sdkPlayer.activateElement(); } catch (e) {} }
-      toast("Spotify: player interno pronto");
-    });
-    sdkPlayer.addListener("not_ready", function () { sdkDeviceId = null; wallpaperMediaHold(false); });
-    sdkPlayer.addListener("player_state_changed", function (st) {
-      if (!st) return;
-      var t = st.track_window && st.track_window.current_track;
-      if (!t) return;
-      var imgs = (t.album && t.album.images) || [];
-      np = {
-        playing: !st.paused,
-        title: t.name || "",
-        artist: (t.artists || []).map(function (a) { return a.name; }).join(", "),
-        art: imgs.length ? imgs[0].url : "",
-        progress_ms: st.position || 0,
-        duration_ms: st.duration || 0
-      };
-      var tid = t.id || t.uri || "";
-      if (tid !== sdkLastTrack) {
-        sdkLastTrack = tid;
-        setTimeout(function () {
-          if (sdkPlayer && sdkPlayer.activateElement) { try { sdkPlayer.activateElement(); } catch (e) {} }
-        }, 600);
-      }
-      renderNowPlaying();
-      wallpaperMediaHold(!st.paused);
-    });
-    sdkPlayer.connect();
-  }
-  window.onSpotifyWebPlaybackSDKReady = initSpotifySdk;
-
-  function spotifyPlayOnTV(retry) {
-    retry = retry || 0;
-    if (sdkDeviceId) {
-      if (sdkPlayer && sdkPlayer.activateElement) {
-        try { sdkPlayer.activateElement(); } catch (e) {}
-      }
-      if (sdkPlayer && sdkPlayer.resume) {
-        try { sdkPlayer.resume().catch(function () {}); } catch (e) {}
-      }
-      spotifyApi("/me/player", "PUT", null, { device_ids: [sdkDeviceId], play: true }).then(function (res) {
-        toast("Player interno: " + res.status);
-        wallpaperMediaHold(true);
-        setTimeout(pollSpotify, 800);
-      }).catch(function () { toast("Não foi possível iniciar a reprodução"); });
-      return;
-    }
-    spotifyApi("/me/player/devices").then(function (res) { return res.json(); }).then(function (data) {
-      var devices = (data && data.devices) || [];
-      var tv = null;
-      for (var i = 0; i < devices.length; i++) {
-        var n = (devices[i].name || "").toLowerCase();
-        if (n.indexOf("tv") >= 0 || n.indexOf("samsung") >= 0 || n.indexOf("au8000") >= 0) { tv = devices[i]; break; }
-      }
-      if (!tv && devices.length) tv = devices[devices.length - 1];
-      if (!tv) {
-        if (retry < 2) {
-          try { window.tizen.application.launch("rJeHak5zRg.Spotify", function () {}, function () {}); } catch (e) {}
-          setTimeout(function () { spotifyPlayOnTV(retry + 1); }, 4000);
-        } else {
-          toast("Abra o Spotify na TV uma vez e tente de novo");
-        }
-        return;
-      }
-      spotifyApi("/me/player", "PUT", null, { device_ids: [tv.id], play: true }).then(function () {
-        toast("Tocando em " + tv.name);
-        // Keep the music, but come straight back to Clean Home so the app
-        // only flashes instead of staying on screen.
-        setTimeout(function () {
-          try { window.tizen.application.launch("tvunlock02.Launcher", function () {}, function () {}); } catch (e) {}
-        }, 1200);
-        setTimeout(pollSpotify, 1600);
-      }).catch(function () { toast("Não foi possível iniciar a reprodução"); });
-    }).catch(function () { toast("Spotify não está acessível"); });
-  }
-
-  function pollSpotify() {
-    clearTimeout(npTimer);
-    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REFRESH) {
-      if (el.npCard) el.npCard.hidden = true;
-      npTimer = setTimeout(pollSpotify, 30000);
-      return;
-    }
-    spotifyApi("/me/player/currently-playing").then(function (res) {
-      if (res.status === 204) return { playing: false };
-      return res.json();
-    }).then(function (data) {
-      if (!data || !data.item) {
-        np = { playing: false };
-      } else {
-        var item = data.item;
-        var images = (item.album && item.album.images) || [];
-        np = {
-          playing: !!data.is_playing,
-          title: item.name || "",
-          artist: (item.artists || []).map(function (a) { return a.name; }).join(", "),
-          art: images.length ? images[0].url : "",
-          progress_ms: data.progress_ms || 0,
-          duration_ms: item.duration_ms || 0
-        };
-      }
-      renderNowPlaying();
-      npTimer = setTimeout(pollSpotify, 6000);
-    }).catch(function () {
-      if (el.npCard) el.npCard.hidden = true;
-      npTimer = setTimeout(pollSpotify, 15000);
-    });
-  }
-
-  function spotifyControl(action) {
-    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REFRESH) { toast("Spotify não está configurado"); return; }
-    if (action === "toggle") action = (np && np.playing) ? "pause" : "play";
-    var path, method;
-    if (action === "play") { path = "/me/player/play"; method = "PUT"; }
-    else if (action === "pause") { path = "/me/player/pause"; method = "PUT"; }
-    else if (action === "next") { path = "/me/player/next"; method = "POST"; }
-    else if (action === "previous") { path = "/me/player/previous"; method = "POST"; }
-    else return;
-    if (np && (action === "play" || action === "pause")) {
-      np.playing = action === "play";
-      renderNowPlaying();
-    }
-    spotifyApi(path, method).then(function () {
-      setTimeout(pollSpotify, 900);
-    }).catch(function () {
-      toast("Spotify não está acessível");
-    });
-  }
-
-  function updateMusicFocus() {
-    for (var i = 0; i < el.muBtns.length; i++) {
-      el.muBtns[i].className = i === state.musicIndex ? "mu-btn focus" : "mu-btn";
-    }
-  }
-
-  function openMusic() {
-    state.musicOpen = true;
-    state.musicIndex = 1;
-    if (el.music) el.music.hidden = false;
-    renderNowPlaying();
-    renderMusicPanel();
-    updateMusicFocus();
-  }
-
-  function closeMusic() {
-    state.musicOpen = false;
-    if (el.music) el.music.hidden = true;
-    paintFocus();
-  }
-
-  function musicActivate() {
-    if (state.musicIndex === 0) spotifyControl("previous");
-    else if (state.musicIndex === 2) spotifyControl("next");
-    else if (np && np.playing) spotifyControl("pause");
-    else spotifyPlayOnTV();
-  }
-
   function switchSource(name) {
     if (!hasTizen()) { toast("Prévia: mudando para " + name); return; }
     try {
@@ -1941,7 +1527,6 @@
   }
 
   function activate() {
-    if (state.zone === "card") { openMusic(); return; }
     if (state.view === "grid") {
       var app = state.grid[state.gridIndex];
       if (!state.grid.length) { paintFocus(); return; }
@@ -1954,7 +1539,6 @@
       if (rail.key === "wifi") { launch({ id: NETWORK_SETTINGS, name: "Wi-Fi" }); return; }
       if (rail.key === "ambient") { launch({ id: "org.tizen.ambientapp", name: "Ambient" }); return; }
       if (rail.key === "livetv") { launch({ id: LIVETV_APP, name: "TV" }); return; }
-      if (rail.key === "music") { openMusic(); return; }
       if (rail.key.indexOf("hdmi") === 0) {
         switchSource("HDMI" + rail.key.slice(4));
         return;
@@ -1969,7 +1553,6 @@
       if (util.key === "refresh") { refreshApps(); return; }
       if (util.key === "edit") { showGrid(true); return; }
       if (util.key === "store") { launchStore(); return; }
-      if (util.key === "music") { openMusic(); return; }
       if (util.key === "wall") { openWallPicker(); return; }
       if (util.key === "controls") { openControls(); return; }
       return;
@@ -2043,20 +1626,10 @@
       return;
     }
 
-    if (state.zone === "card") {
-      if (key === 38) { state.zone = "utils"; state.utilIndex = 0; }
-      if (key === 40) state.zone = "dock";
-      paintFocus();
-      return;
-    }
-
     if (state.zone === "utils") {
       if (key === 37) state.utilIndex = Math.max(0, state.utilIndex - 1);
       if (key === 39) state.utilIndex = Math.min(utils.length - 1, state.utilIndex + 1);
-      if (key === 40) {
-        if (np && np.title) state.zone = "card";
-        else state.zone = "dock";
-      }
+      if (key === 40) state.zone = "dock";
       if (key === 38) state.zone = "utils";
       paintFocus();
       return;
@@ -2072,10 +1645,7 @@
 
     if (key === 37) state.dockIndex = Math.max(0, state.dockIndex - 1);
     if (key === 39) state.dockIndex = Math.min(Math.max(0, state.dock.length - 1), state.dockIndex + 1);
-    if (key === 38) {
-      if (np && np.title) state.zone = "card";
-      else { state.zone = "utils"; state.utilIndex = 0; }
-    }
+    if (key === 38) { state.zone = "utils"; state.utilIndex = 0; }
     if (key === 40) return;
     paintFocus();
   }
@@ -2127,29 +1697,12 @@
       event.preventDefault(); return;
     }
 
-    // Remote transport keys work while the launcher is on screen.
-    if (key === 10252 || key === 415 || key === 19 || key === 178) {
-      if (np && np.playing) spotifyControl("pause"); else spotifyPlayOnTV();
-      event.preventDefault();
-      return;
-    }
-    if (key === 10233 || key === 417) { spotifyControl("next"); event.preventDefault(); return; }
-    if (key === 10232 || key === 412) { spotifyControl("previous"); event.preventDefault(); return; }
-
     if (perf.keyMs === null) {
       var t0 = performance.now();
       requestAnimationFrame(function () {
         perf.keyMs = Math.round(performance.now() - t0);
         sendPerf();
       });
-    }
-
-    if (state.musicOpen) {
-      event.preventDefault();
-      if (key === 10009) { closeMusic(); return; }
-      if (key === 37) { state.musicIndex = Math.max(0, state.musicIndex - 1); updateMusicFocus(); return; }
-      if (key === 39) { state.musicIndex = Math.min(2, state.musicIndex + 1); updateMusicFocus(); return; }
-      return;
     }
 
     if (key === 13) {
@@ -2185,7 +1738,6 @@
 
   function onKeyUp(event) {
     if (event.keyCode !== 13) return;
-    if (state.musicOpen) { musicActivate(); event.preventDefault(); return; }
     clearTimeout(state.holdTimer);
     if (state.suppressActivate) {
       state.suppressActivate = false;
@@ -2707,14 +2259,11 @@
     applyTheme();
     fit();
     tick();
-    setInterval(tick, 15000);
+    setInterval(tick, 30000);
     setTimeout(loadWeather, 800);
-    setInterval(loadWeather, 900000);
+    setInterval(loadWeather, 1800000);
     if (window.tizen && window.tizen.tvinputdevice) {
-      ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaStop",
-       "MediaTrackPrevious", "MediaTrackNext", "MediaFastForward", "MediaRewind",
-       "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue", "Info"
-      ].forEach(function (name) {
+      ["ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue", "Info"].forEach(function (name) {
         try { window.tizen.tvinputdevice.registerKey(name); } catch (e) {}
       });
     }
@@ -2734,17 +2283,7 @@
       if (document.visibilityState === "visible") fetchPanelConfig(false);
     }, PANEL_POLL_MS);
     setTimeout(readNetwork, 250);
-    setInterval(readNetwork, 10000);
-    setTimeout(pollSpotify, 1500);
-    if (SPOTIFY_CLIENT_ID && SPOTIFY_REFRESH) { spotifyRefreshToken().catch(function () {}); }
-    setTimeout(function () {
-      if (!window.Spotify) {
-        var sdkScript = document.createElement("script");
-        sdkScript.src = "https://sdk.scdn.co/spotify-player.js";
-        sdkScript.async = true;
-        document.head.appendChild(sdkScript);
-      }
-    }, 1800);
+    setInterval(readNetwork, 30000);
     try {
       if (window.tizen && tizen.application && tizen.application.addAppInfoEventListener) {
         tizen.application.addAppInfoEventListener(function (info) {
@@ -2761,19 +2300,14 @@
       var c = readAppsCache();
       if (c && Date.now() - c.t > CACHE_MAX_AGE) setTimeout(fetchApps, 1500);
       fetchPanelConfig(false);
-      pollSpotify();
       if (el.wallpaper && el.wallpaper.classList.contains("on")) {
         el.wallpaper.play().catch(function () {});
       }
     });
-    if (/[?&]music=1/.test(location.search)) {
-      setTimeout(function () { openMusic(); }, 1800);
-    }
     var zone = /[?&]zone=([a-z]+)/.exec(location.search);
     if (zone) {
       setTimeout(function () {
-        state.zone = zone[1] === "card" ? "card"
-          : (zone[1] === "rail" ? "rail" : "utils");
+        state.zone = zone[1] === "rail" ? "rail" : "utils";
         state.utilIndex = 0;
         state.railIndex = 0;
         paintFocus();
@@ -2784,13 +2318,8 @@
   window.addEventListener("resize", fit);
   document.addEventListener("keydown", onKeyDown);
   document.addEventListener("keydown", function (e) {
-    if (sdkPlayer && sdkPlayer.activateElement && (!document._lastAct || Date.now() - document._lastAct > 3000)) {
-      document._lastAct = Date.now();
-      try { sdkPlayer.activateElement(); } catch (err) {}
-    }
     if (e.keyCode === 403) { cycleWallpaper(1); e.preventDefault(); }
     else if (e.keyCode === 404) { cycleWallpaper(-1); e.preventDefault(); }
-    else if (e.keyCode === 405 || e.keyCode === 406 || e.keyCode === 56 || e.keyCode === 457) { probeEme(); e.preventDefault(); }
     else if (e.keyCode === 87) { cycleWallpaper(1); }
   });
   document.addEventListener("keyup", onKeyUp);

@@ -126,12 +126,6 @@ window.TV_CONFIG = {
   panelUrl: "http://IP_DO_CELULAR:8099",  // "" desativa a sincronização
   debugUrl: "",                           // coletor de diagnóstico da TV (opcional)
 
-  // Música (Spotify Connect): as três chaves são opcionais. Sem elas o card
-  // "Tocando agora" fica escondido e os controles de mídia não aparecem.
-  spotifyUrl: "",
-  spotifyClientId: "SEU_CLIENT_ID_DO_SPOTIFY",
-  spotifyRefreshToken: "SEU_REFRESH_TOKEN_DO_SPOTIFY",
-
   // Clima sob a data (null desativa). Coordenadas, não nome de cidade.
   weather: { latitude: -23.5505, longitude: -46.6333, units: "celsius" },
 
@@ -141,20 +135,16 @@ window.TV_CONFIG = {
 
 - **`panelUrl`** é só o primeiro palpite. Se o app não responder nesse endereço, ele varre
   a sub-rede `/24` na porta do painel, valida com `/health` e guarda o endereço encontrado
-  no armazenamento local da TV (nova varredura no máximo a cada 5 minutos).
+  no armazenamento local da TV (nova varredura no máximo a cada 15 minutos).
 - **`weather`** é um objeto com `latitude`, `longitude` e `units` (`"celsius"` ou
   `"fahrenheit"`). Os dados vêm da Open-Meteo, que não pede chave. Um texto como
   `"Cidade,UF"` **não** funciona: sem latitude/longitude o bloco de clima fica oculto.
-- **`spotifyClientId` / `spotifyRefreshToken`** habilitam o player dentro do launcher
-  (Web Playback SDK) e os botões de mídia do controle. O refresh token é uma credencial
-  pessoal: ele fica só no `config.js`, que não é versionado — nunca o coloque no
-  `config.example.js` nem no README.
 - **`customWallpapers`** aceita `{ id, name, file }` com URL de imagem ou vídeo.
 
 ### Como a sincronização funciona
 
 O painel mantém um `revision` que aumenta a cada mudança. O app busca `/config.json` no
-boot, ao voltar ao primeiro plano e a cada 20 segundos — mas só aplica o `active` quando a
+boot, ao voltar ao primeiro plano e a cada 60 segundos — mas só aplica o `active` quando a
 revisão é maior que a última vista. Assim, uma troca feita pelo controle remoto na TV não
 é desfeita pela sincronização.
 
@@ -195,7 +185,7 @@ Como o repositório remoto já nasce vazio, o `push` é aceito direto — sem `-
 
 | Fica de fora | Por quê |
 | :--- | :--- |
-| `config.js` | IP do painel, tokens do Spotify e wallpapers pessoais (modelo: `config.example.js`) |
+| `config.js` | IP do painel e wallpapers pessoais (modelo: `config.example.js`) |
 | `panel/data/` | wallpapers enviados e o estado do painel |
 | `*.wgt`, `*.tpk` | builds gerados a partir do código |
 | `panel/__pycache__/` | cache do Python |
