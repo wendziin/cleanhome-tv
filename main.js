@@ -55,7 +55,6 @@
   var LIVETV_APP = "com.samsung.tv.coba.livetv";
   var STORE_KEY = "cleanhome.v2";
   var MAX_DOCK = 9;
-  var GRID_COLS = 5;
   var ROW_H = 158;
 
   var INTERNAL_IDS = [
@@ -169,7 +168,6 @@
     toast: document.getElementById("toast"),
     wallpicker: document.getElementById("wallpicker"),
     wallgrid: document.getElementById("wallgrid"),
-    glow: document.getElementById("glow"),
     greeting: document.getElementById("greeting"),
     npCard: document.getElementById("np-card"),
     npArt: document.getElementById("np-art"),
@@ -189,7 +187,6 @@
     muBtns: document.querySelectorAll(".mu-btn")
   };
 
-  var SPOTIFY_URL = ((window.TV_CONFIG && window.TV_CONFIG.spotifyUrl) || "").replace(/\/+$/, "");
   // Endereço opcional de um coletor de diagnóstico (perf/caps/dump). Vazio desativa.
   var DEBUG_URL = ((window.TV_CONFIG && window.TV_CONFIG.debugUrl) || "").replace(/\/+$/, "");
   var SPOTIFY_CLIENT_ID = (window.TV_CONFIG && window.TV_CONFIG.spotifyClientId) || "";
@@ -352,24 +349,6 @@
     navigator.requestMediaKeySystemAccess("com.widevine.alpha", cfgs)
       .then(function () { probeToast("EME: Widevine audio SUPPORTED"); })
       .catch(function () { probeToast("EME: no Widevine audio"); });
-  }
-  function testTone() {
-    try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) { probeToast("Sound: no AudioContext"); return; }
-      var ctx = new AC();
-      var osc = ctx.createOscillator();
-      var gain = ctx.createGain();
-      osc.frequency.value = 660;
-      gain.gain.value = 0.06;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      setTimeout(function () { try { osc.stop(); ctx.close(); } catch (e) {} }, 1400);
-      probeToast("Sound: 660 Hz test tone playing");
-    } catch (e) {
-      probeToast("Sound: test failed");
-    }
   }
   var wallpaperResumeTimer = null;
   function wallpaperMediaHold(hold) {
@@ -649,15 +628,44 @@
       if (state.wallOpen) renderWallPicker();
     });
   }
+  // Cópia local cujo wallpaper o painel não publica mais: some da lista, senão
+  // fica na galeria com uma URL já revogada (miniatura quebrada até reiniciar).
+  function pruneCachedWallpapers(list) {
+    var published = {};
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].id) published[list[i].id] = true;
+    }
+    var currentId = WALLPAPERS[wallpaperIndex] ? WALLPAPERS[wallpaperIndex].id : "";
+    var kept = [];
+    for (i = 0; i < WALLPAPERS.length; i++) {
+      var wp = WALLPAPERS[i];
+      if (wp.cached && !published[wp.id] && wp.id !== currentId) continue;
+      kept.push(wp);
+    }
+    if (kept.length === WALLPAPERS.length) return;
+    WALLPAPERS = kept;
+    wallpaperIndex = Math.max(0, findWallpaperIndex(currentId));
+  }
   function applyPanelConfig(cfg, initial) {
     if (!cfg || !Array.isArray(cfg.wallpapers)) return;
-    var currentId = WALLPAPERS[wallpaperIndex] ? WALLPAPERS[wallpaperIndex].id : "";
+    var currentWp = WALLPAPERS[wallpaperIndex] || null;
+    var currentId = currentWp ? currentWp.id : "";
     mergeRemoteWallpapers(cfg.wallpapers);
+    pruneCachedWallpapers(cfg.wallpapers);
     // Baixa (em segundo plano) o que ainda não está na TV para o wallpaper
     // continuar valendo com o painel desligado.
     cacheStore(cfg.wallpapers);
     var current = findWallpaperIndex(currentId);
-    wallpaperIndex = current < 0 ? 0 : current;
+    if (current >= 0) {
+      wallpaperIndex = current;
+    } else if (currentWp && currentWp.remote && !currentWp.cached) {
+      // A imagem que estava na tela saiu do painel: a TV volta ao tema puro em
+      // vez de deixar o índice apontando para um wallpaper que não existe.
+      wallpaperIndex = 0;
+      setWallpaper(0, { quiet: true, remember: false });
+    } else {
+      wallpaperIndex = 0;
+    }
     if (state.wallOpen) renderWallPicker();
     // No primeiro contato, o wallpaper salvo na TV volta a valer (pode ser
     // remoto e só existir depois da mesclagem acima).
@@ -906,6 +914,9 @@
     wallpaperFocus();
   }
   function wallActivate() {
+    // O Enter foi consumido no keydown. Sem esta marca o keyup chamaria
+    // activate() e, além de trocar o wallpaper, abriria o app focado no dock.
+    state.suppressActivate = true;
     setWallpaper(state.wallIndex);
     closeWallPicker();
   }
@@ -1003,6 +1014,8 @@
   function controlsActivate() {
     var item = CONTROLS[state.controlsIndex];
     if (!item) return;
+    // Mesmo motivo do wallpaper picker: o OK já agiu aqui, no keydown.
+    state.suppressActivate = true;
     if (item.key !== "family-carousel") closeControls();
     if (item.key === "tv") { launch({ id: LIVETV_APP, name: "TV" }); return; }
     if (item.key.indexOf("hdmi") === 0) { switchSource("HDMI" + item.key.slice(4)); return; }
@@ -1012,7 +1025,7 @@
     if (item.key === "theme") { cycleTheme(); return; }
     if (item.key === "family-carousel") {
       var indexes = familyWallpaperIndexes();
-      if (!indexes.length) { toast("No family photos installed"); return; }
+      if (!indexes.length) { toast("Nenhuma foto da família instalada"); return; }
       if (state.familyCarousel) {
         stopFamilyCarousel();
         renderControls();
@@ -1100,30 +1113,6 @@
       if (THEMES[i].id === id) return THEMES[i];
     }
     return THEMES[0];
-  }
-
-  function hexToRgba(hex, alpha) {
-    var value = String(hex || "#5A7CFF").replace("#", "");
-    if (value.length === 3) value = value[0] + value[0] + value[1] + value[1] + value[2] + value[2];
-    var n = parseInt(value, 16);
-    if (isNaN(n)) return "rgba(90,124,255," + alpha + ")";
-    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + alpha + ")";
-  }
-
-  function brandColor(name) {
-    var brand = brandFor(name);
-    if (brand && brand.color) return brand.color;
-    return "#5A7CFF";
-  }
-
-  function setGlow(app) {
-    // Static glow only: tinting it per app repaints a 900x340 layer on every
-    // keypress, which cost ~15 fps on this set.
-    if (true) return;
-    if (!el.glow) return;
-    var color = app ? brandColor(app.name) : "#5A7CFF";
-    el.glow.style.background = "radial-gradient(ellipse at 50% 100%, " +
-      hexToRgba(color, app ? 0.20 : 0.10) + ", transparent 66%)";
   }
 
   function applyTheme() {
@@ -1358,24 +1347,24 @@
 
   function railItems() {
     function hdmiStatus(n) {
-      if (state.videoSources === null) return "Checking…";
+      if (state.videoSources === null) return "Verificando…";
       for (var i = 0; i < state.videoSources.length; i++) {
         var source = state.videoSources[i] || {};
         if (String(source.type || "").toUpperCase() !== "HDMI") continue;
         var number = String(source.number || source.name || "").replace(/\D/g, "");
-        if (number === String(n)) return "Connected";
+        if (number === String(n)) return "Conectado";
       }
-      return "Not connected";
+      return "Não conectado";
     }
     return [
-      { key: "music", label: "Music", sub: "Spotify" },
-      { key: "wifi", label: "Wi-Fi", sub: state.network === "WIFI" && state.wifiStatus !== "OFF" ? (state.wifiSsid || "Connected") : (state.network === "ETHERNET" ? "Ethernet" : "No network"), up: (state.network === "WIFI" && state.wifiStatus !== "OFF") || state.network === "ETHERNET" },
-      { key: "hdmi1", label: "HDMI 1", sub: hdmiStatus(1), up: hdmiStatus(1) === "Connected" },
-      { key: "hdmi2", label: "HDMI 2", sub: hdmiStatus(2), up: hdmiStatus(2) === "Connected" },
-      { key: "hdmi3", label: "HDMI 3", sub: hdmiStatus(3), up: hdmiStatus(3) === "Connected" },
-      { key: "hdmi4", label: "HDMI 4", sub: hdmiStatus(4), up: hdmiStatus(4) === "Connected" },
-      { key: "livetv", label: "TV", sub: "Tuner" },
-      { key: "ambient", label: "Ambient", sub: "Art" }
+      { key: "music", label: "Música", sub: "Spotify" },
+      { key: "wifi", label: "Wi-Fi", sub: state.network === "WIFI" && state.wifiStatus !== "OFF" ? (state.wifiSsid || "Conectado") : (state.network === "ETHERNET" ? "Rede cabeada" : "Sem rede"), up: (state.network === "WIFI" && state.wifiStatus !== "OFF") || state.network === "ETHERNET" },
+      { key: "hdmi1", label: "HDMI 1", sub: hdmiStatus(1), up: hdmiStatus(1) === "Conectado" },
+      { key: "hdmi2", label: "HDMI 2", sub: hdmiStatus(2), up: hdmiStatus(2) === "Conectado" },
+      { key: "hdmi3", label: "HDMI 3", sub: hdmiStatus(3), up: hdmiStatus(3) === "Conectado" },
+      { key: "hdmi4", label: "HDMI 4", sub: hdmiStatus(4), up: hdmiStatus(4) === "Conectado" },
+      { key: "livetv", label: "TV", sub: "Sintonizador" },
+      { key: "ambient", label: "Ambiente", sub: "Arte" }
     ];
   }
 
@@ -1536,7 +1525,6 @@
   }
 
   function paintFocus() {
-    setGlow(null);
     if (el.npCard) el.npCard.classList.remove("focus");
 
     if (state.view === "grid") {
@@ -1577,7 +1565,7 @@
       setChips(el.rail, -1);
       el.npCard.classList.add("focus");
       setStack(el.eyebrowStack, "music");
-      showTitle("music", [np ? np.title : "Now playing"], 0);
+      showTitle("music", [np ? np.title : "Tocando agora"], 0);
       setStack(el.subStack, "music");
       return;
     }
@@ -1601,8 +1589,6 @@
     movePlate(el.gridPlate, null);
     setChips(el.utils, -1);
     setChips(el.rail, -1);
-    var current = state.dock[state.dockIndex];
-    setGlow(current);
     setStack(el.eyebrowStack, state.reordering ? "reorder" : "apps");
     showTitle("dock", state.dock.length
       ? state.dock.map(function (a) { return labelFor(a); })
@@ -1706,8 +1692,8 @@
   function renderNowPlaying() {
     if (!np || !np.title) {
       el.npCard.hidden = false;
-      setText(el.npTitle, "Nothing playing");
-      setText(el.npArtist, "Press OK to play on TV");
+      setText(el.npTitle, "Nada tocando");
+      setText(el.npArtist, "Pressione OK para tocar na TV");
       el.npFill.style.width = "0%";
       if (el.npArt.getAttribute("src") !== "icons/cd.svg") el.npArt.src = "icons/cd.svg";
       el.npArt.classList.add("on");
@@ -1781,7 +1767,7 @@
     sdkPlayer.addListener("ready", function (d) {
       sdkDeviceId = d.device_id;
       if (sdkPlayer.activateElement) { try { sdkPlayer.activateElement(); } catch (e) {} }
-      toast("Spotify: in-app player ready");
+      toast("Spotify: player interno pronto");
     });
     sdkPlayer.addListener("not_ready", function () { sdkDeviceId = null; wallpaperMediaHold(false); });
     sdkPlayer.addListener("player_state_changed", function (st) {
@@ -1821,10 +1807,10 @@
         try { sdkPlayer.resume().catch(function () {}); } catch (e) {}
       }
       spotifyApi("/me/player", "PUT", null, { device_ids: [sdkDeviceId], play: true }).then(function (res) {
-        toast("SDK transfer: " + res.status);
+        toast("Player interno: " + res.status);
         wallpaperMediaHold(true);
         setTimeout(pollSpotify, 800);
-      }).catch(function () { toast("Could not start playback"); });
+      }).catch(function () { toast("Não foi possível iniciar a reprodução"); });
       return;
     }
     spotifyApi("/me/player/devices").then(function (res) { return res.json(); }).then(function (data) {
@@ -1840,20 +1826,20 @@
           try { window.tizen.application.launch("rJeHak5zRg.Spotify", function () {}, function () {}); } catch (e) {}
           setTimeout(function () { spotifyPlayOnTV(retry + 1); }, 4000);
         } else {
-          toast("Open Spotify on the TV once, then try again");
+          toast("Abra o Spotify na TV uma vez e tente de novo");
         }
         return;
       }
       spotifyApi("/me/player", "PUT", null, { device_ids: [tv.id], play: true }).then(function () {
-        toast("Playing on " + tv.name);
+        toast("Tocando em " + tv.name);
         // Keep the music, but come straight back to Clean Home so the app
         // only flashes instead of staying on screen.
         setTimeout(function () {
           try { window.tizen.application.launch("tvunlock02.Launcher", function () {}, function () {}); } catch (e) {}
         }, 1200);
         setTimeout(pollSpotify, 1600);
-      }).catch(function () { toast("Could not start playback"); });
-    }).catch(function () { toast("Spotify is not reachable"); });
+      }).catch(function () { toast("Não foi possível iniciar a reprodução"); });
+    }).catch(function () { toast("Spotify não está acessível"); });
   }
 
   function pollSpotify() {
@@ -1890,7 +1876,7 @@
   }
 
   function spotifyControl(action) {
-    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REFRESH) { toast("Spotify is not set up"); return; }
+    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_REFRESH) { toast("Spotify não está configurado"); return; }
     if (action === "toggle") action = (np && np.playing) ? "pause" : "play";
     var path, method;
     if (action === "play") { path = "/me/player/play"; method = "PUT"; }
@@ -1905,7 +1891,7 @@
     spotifyApi(path, method).then(function () {
       setTimeout(pollSpotify, 900);
     }).catch(function () {
-      toast("Spotify is not reachable");
+      toast("Spotify não está acessível");
     });
   }
 
@@ -1938,7 +1924,7 @@
   }
 
   function switchSource(name) {
-    if (!hasTizen()) { toast("Preview: switch to " + name); return; }
+    if (!hasTizen()) { toast("Prévia: mudando para " + name); return; }
     try {
       var data = [
         new window.tizen.ApplicationControlData("source", [name]),
@@ -2019,7 +2005,7 @@
   function back() {
     if (state.view === "grid") { showHome(); return; }
     if (state.zone === "utils") { state.zone = "dock"; paintFocus(); return; }
-    toast("Press the TV's Home button for Smart Hub");
+    toast("Use o botão Home da TV para abrir o Smart Hub");
   }
 
   // ---------------------------------------------------------------- keys
@@ -2322,16 +2308,16 @@
       state.zone = "dock";
       state.dockIndex = (state.dockIndex + 1) % state.dock.length;
       if (perf.benchMode === "text") {
-        el.title.textContent = "App " + moves;
+        el.titleStack.textContent = "App " + moves;
       } else if (perf.benchMode === "ts") {
-        el.title.textContent = "Item " + moves;
-        el.sub.textContent = "Sub " + moves;
+        el.titleStack.textContent = "Item " + moves;
+        el.subStack.textContent = "Sub " + moves;
       } else if (perf.benchMode === "eyebrow") {
-        el.eyebrow.textContent = "ITEM " + moves;
+        el.eyebrowStack.textContent = "ITEM " + moves;
       } else if (perf.benchMode === "text3") {
-        el.eyebrow.textContent = "CONTROLS";
-        el.title.textContent = "Item " + moves;
-        el.sub.textContent = "Subtitle " + moves;
+        el.eyebrowStack.textContent = "CONTROLS";
+        el.titleStack.textContent = "Item " + moves;
+        el.subStack.textContent = "Subtitle " + moves;
       } else if (perf.benchMode === "clear") {
         clearFocus();
       } else if (perf.benchMode === "chips") {
@@ -2665,7 +2651,7 @@
     store.dock = state.dock.map(function (a) { return a.id; });
 
     el.empty.hidden = apps.length > 0;
-    if (!apps.length) el.emptyText.textContent = "The TV returned an empty app list.";
+    if (!apps.length) el.emptyText.textContent = "A TV retornou uma lista de apps vazia.";
 
     renderUtils();
     renderDock();
@@ -2683,7 +2669,7 @@
       adopt(apps);
     }, function (err) {
       el.empty.hidden = false;
-      el.emptyText.textContent = "Could not read the app list: " +
+      el.emptyText.textContent = "Não foi possível ler a lista de apps: " +
         (err && err.message ? err.message : "unknown error");
     });
   }
@@ -2749,7 +2735,6 @@
     }, PANEL_POLL_MS);
     setTimeout(readNetwork, 250);
     setInterval(readNetwork, 10000);
-    try { SPOTIFY_URL = localStorage.getItem("spotifyUrl") || SPOTIFY_URL; } catch (e) {}
     setTimeout(pollSpotify, 1500);
     if (SPOTIFY_CLIENT_ID && SPOTIFY_REFRESH) { spotifyRefreshToken().catch(function () {}); }
     setTimeout(function () {

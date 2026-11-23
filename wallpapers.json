@@ -68,12 +68,5 @@
     "category": "web",
     "file": "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1920&q=80",
     "thumb": "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=360&q=70"
-  },
-  {
-    "id": "local-celular",
-    "name": "Meu Celular (foto1.jpg)",
-    "category": "local",
-    "file": "http://192.0.2.10:8080/foto1.jpg",
-    "thumb": "http://192.0.2.10:8080/foto1.jpg"
   }
 ]

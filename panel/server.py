@@ -28,6 +28,9 @@ STATE_PATH = os.path.join(DATA_DIR, "config.json")
 
 LOCK = threading.Lock()
 MAX_UPLOAD = 30 * 1024 * 1024
+# Quanto de um upload recusado ainda é lido e descartado para a resposta 413
+# chegar ao cliente em vez de um erro de conexão.
+MAX_DRAIN = 4 * MAX_UPLOAD
 # Quantos wallpapers enviados ficam guardados para a TV. O mais antigo sai
 # quando entra um novo, para a galeria não crescer sem fim.
 KEEP_MAX = 3
@@ -163,6 +166,8 @@ class PanelHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.cors()
         self.end_headers()
         if self.command != "HEAD":
@@ -184,6 +189,20 @@ class PanelHandler(BaseHTTPRequestHandler):
             return
         self.respond(200, body, content_type)
 
+    def drain(self, length):
+        """Descarta o corpo anunciado, sem guardar em memória.
+
+        Drenar até o fim deixa o cliente terminar o envio e receber o 413 de
+        verdade; fechar no meio faz o navegador mostrar erro de rede. O teto
+        de MAX_DRAIN evita prender a thread com um Content-Length absurdo.
+        """
+        budget = min(length, MAX_DRAIN)
+        while budget > 0:
+            chunk = self.rfile.read(min(65536, budget))
+            if not chunk:
+                break
+            budget -= len(chunk)
+
     def read_body(self):
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -192,6 +211,10 @@ class PanelHandler(BaseHTTPRequestHandler):
         if length <= 0:
             return b""
         if length > MAX_UPLOAD:
+            # Sem drenar, os bytes restantes ficariam pendentes no socket e a
+            # próxima requisição keep-alive seria lida como lixo.
+            self.close_connection = True
+            self.drain(length)
             return None
         return self.rfile.read(length)
 

@@ -125,7 +125,16 @@ cp config.example.js config.js
 window.TV_CONFIG = {
   panelUrl: "http://IP_DO_CELULAR:8099",  // "" desativa a sincronização
   debugUrl: "",                           // coletor de diagnóstico da TV (opcional)
-  weather: null,                          // "Cidade,UF" para mostrar clima
+
+  // Música (Spotify Connect): as três chaves são opcionais. Sem elas o card
+  // "Tocando agora" fica escondido e os controles de mídia não aparecem.
+  spotifyUrl: "",
+  spotifyClientId: "SEU_CLIENT_ID_DO_SPOTIFY",
+  spotifyRefreshToken: "SEU_REFRESH_TOKEN_DO_SPOTIFY",
+
+  // Clima sob a data (null desativa). Coordenadas, não nome de cidade.
+  weather: { latitude: -23.5505, longitude: -46.6333, units: "celsius" },
+
   customWallpapers: []                    // wallpapers extras por URL
 };
 ```
@@ -133,6 +142,13 @@ window.TV_CONFIG = {
 - **`panelUrl`** é só o primeiro palpite. Se o app não responder nesse endereço, ele varre
   a sub-rede `/24` na porta do painel, valida com `/health` e guarda o endereço encontrado
   no armazenamento local da TV (nova varredura no máximo a cada 5 minutos).
+- **`weather`** é um objeto com `latitude`, `longitude` e `units` (`"celsius"` ou
+  `"fahrenheit"`). Os dados vêm da Open-Meteo, que não pede chave. Um texto como
+  `"Cidade,UF"` **não** funciona: sem latitude/longitude o bloco de clima fica oculto.
+- **`spotifyClientId` / `spotifyRefreshToken`** habilitam o player dentro do launcher
+  (Web Playback SDK) e os botões de mídia do controle. O refresh token é uma credencial
+  pessoal: ele fica só no `config.js`, que não é versionado — nunca o coloque no
+  `config.example.js` nem no README.
 - **`customWallpapers`** aceita `{ id, name, file }` com URL de imagem ou vídeo.
 
 ### Como a sincronização funciona
